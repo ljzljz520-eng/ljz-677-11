@@ -40,6 +40,12 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
+# 应用自定义配置
+app:
+  import:
+    # 上传文件临时目录（异步解析期间存放，任务结束自动删除）
+    temp-dir: ${IMPORT_TEMP_DIR:./import-temp}
+
 # JWT配置
 jwt:
   secret: excel-import-system-jwt-secret-key-2024-very-long-and-secure

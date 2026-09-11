@@ -48,14 +48,23 @@
             {{ formatTime(row.createTime) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
             <div class="flex space-x-2">
               <el-button type="primary" link size="small" @click="viewDetail(row)">
                 详情
               </el-button>
               <el-button
-                v-if="row.status === 1"
+                v-if="row.status === 0"
+                type="primary"
+                link
+                size="small"
+                @click="continueTask(row)"
+              >
+                查看进度
+              </el-button>
+              <el-button
+                v-if="row.status === 1 || row.status === 2"
                 type="success"
                 link
                 size="small"
@@ -173,12 +182,12 @@ const currentBatchNo = ref('')
 const retrying = ref(false)
 
 const getStatusType = (status) => {
-  const types = { 0: 'info', 1: 'success', 2: 'warning' }
+  const types = { 0: 'info', 1: 'success', 2: 'warning', 3: 'danger' }
   return types[status] || 'info'
 }
 
 const getStatusText = (status) => {
-  const texts = { 0: '处理中', 1: '完成', 2: '部分失败' }
+  const texts = { 0: '处理中', 1: '完成', 2: '部分失败', 3: '失败/中断' }
   return texts[status] || '未知'
 }
 
@@ -215,6 +224,11 @@ const handleCurrentChange = (page) => {
 
 const viewDetail = (row) => {
   router.push(`/data/${row.batchNo}`)
+}
+
+const continueTask = (row) => {
+  localStorage.setItem('excel_import_task_no', row.batchNo)
+  router.push({ path: '/import', query: { task: row.batchNo } })
 }
 
 const reportData = async (row) => {

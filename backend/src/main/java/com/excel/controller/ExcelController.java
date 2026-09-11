@@ -4,10 +4,11 @@ import com.alibaba.excel.EasyExcel;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.excel.dto.ApiResponse;
 import com.excel.dto.ExcelDataDTO;
-import com.excel.dto.ImportResultDTO;
 import com.excel.dto.ReportResultDTO;
+import com.excel.dto.TaskProgressDTO;
 import com.excel.entity.ExcelData;
 import com.excel.entity.ImportRecord;
+import com.excel.entity.ImportRowError;
 import com.excel.service.ExcelImportService;
 import com.excel.service.ReportService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -25,45 +26,102 @@ import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
 
 @RestController
 @RequestMapping("/api/excel")
 @RequiredArgsConstructor
-@Tag(name = "Excel导入管理", description = "Excel数据导入与上报接口")
+@Tag(name = "Excel导入管理", description = "Excel异步分批导入、进度查询与上报接口")
 public class ExcelController {
 
     private static final Logger logger = LoggerFactory.getLogger(ExcelController.class);
 
     private final ExcelImportService excelImportService;
     private final ReportService reportService;
+    private final ExecutorService importExecutor;
 
-    @PostMapping("/import")
-    @Operation(summary = "导入Excel", description = "上传Excel文件进行数据导入")
-    public ApiResponse<ImportResultDTO> importExcel(
-            @RequestParam("file") MultipartFile file,
-            Authentication authentication) {
+    @PostMapping("/tasks")
+    @Operation(summary = "创建导入任务", description = "上传Excel，立即返回任务编号；后台流式分批解析")
+    public ApiResponse<Map<String, String>> createTask(@RequestParam("file") MultipartFile file,
+                                                       Authentication authentication) {
         try {
-            if (file.isEmpty()) {
-                return ApiResponse.error("请选择要上传的文件");
-            }
-
-            String fileName = file.getOriginalFilename();
-            if (fileName == null || (!fileName.endsWith(".xlsx") && !fileName.endsWith(".xls"))) {
-                return ApiResponse.error("仅支持Excel文件（.xlsx或.xls）");
-            }
-
             Long userId = (Long) authentication.getPrincipal();
-            ImportResultDTO result = excelImportService.importExcel(file, userId);
-            return ApiResponse.success("导入完成", result);
+            String taskNo = excelImportService.createTask(file, userId);
+            // 提交后台解析，HTTP 请求立即结束
+            importExecutor.execute(() -> excelImportService.runTask(taskNo));
+
+            Map<String, String> data = new HashMap<>();
+            data.put("taskNo", taskNo);
+            return ApiResponse.success("任务已创建", data);
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(400, e.getMessage());
         } catch (Exception e) {
-            logger.error("Excel导入失败", e);
-            return ApiResponse.error("导入失败: " + e.getMessage());
+            logger.error("创建导入任务失败", e);
+            return ApiResponse.error("创建任务失败: " + e.getMessage());
         }
     }
 
+    @GetMapping("/tasks/{taskNo}")
+    @Operation(summary = "查询导入进度", description = "凭任务编号查看已读取/已校验/失败行数及预计完成时间")
+    public ApiResponse<TaskProgressDTO> getTaskProgress(@PathVariable String taskNo) {
+        TaskProgressDTO progress = excelImportService.getProgress(taskNo);
+        if (progress == null) {
+            return ApiResponse.error(404, "任务不存在: " + taskNo);
+        }
+        return ApiResponse.success(progress);
+    }
+
+    @GetMapping("/tasks/{taskNo}/errors")
+    @Operation(summary = "分页查询失败行", description = "任务完成后分页查看校验失败的数据行")
+    public ApiResponse<Page<ImportRowError>> getTaskErrors(
+            @PathVariable String taskNo,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "20") Integer pageSize) {
+        return ApiResponse.success(excelImportService.getErrors(taskNo, pageNum, pageSize));
+    }
+
+    @GetMapping("/tasks/{taskNo}/errors/export")
+    @Operation(summary = "导出失败行", description = "将失败行及错误原因导出为Excel（流式写出）")
+    public void exportTaskErrors(@PathVariable String taskNo, HttpServletResponse response) throws IOException {
+        List<ImportRowError> errors = excelImportService.getAllErrors(taskNo);
+
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding("utf-8");
+        String fileName = URLEncoder.encode("导入失败数据_" + taskNo, StandardCharsets.UTF_8)
+                .replaceAll("\\+", "%20");
+        response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + fileName + ".xlsx");
+
+        List<ExcelDataDTO> exportList = new ArrayList<>(errors.size());
+        for (ImportRowError e : errors) {
+            ExcelDataDTO dto = new ExcelDataDTO();
+            dto.setRowIndex(e.getRowIndex());
+            dto.setDataCode(e.getDataCode());
+            dto.setName(e.getName());
+            dto.setIdCard(e.getIdCard());
+            dto.setPhone(e.getPhone());
+            if (e.getAmount() != null && !e.getAmount().isBlank()) {
+                try {
+                    dto.setAmount(new BigDecimal(e.getAmount()));
+                } catch (NumberFormatException ignore) {
+                    // 原始非法金额无法转数值时留空，错误原因里保留
+                }
+            }
+            dto.setAddress(e.getAddress());
+            dto.setRemark(e.getRemark());
+            dto.setErrorMsg(e.getErrorMsg());
+            exportList.add(dto);
+        }
+
+        EasyExcel.write(response.getOutputStream(), ExcelDataDTO.class)
+                .sheet("导入失败数据")
+                .doWrite(exportList);
+    }
+
     @GetMapping("/records")
-    @Operation(summary = "获取导入记录", description = "分页获取导入记录列表")
+    @Operation(summary = "获取导入记录", description = "分页获取导入任务列表")
     public ApiResponse<Page<ImportRecord>> getImportRecords(
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "10") Integer pageSize) {
@@ -142,7 +200,7 @@ public class ExcelController {
     }
 
     @GetMapping("/export/errors/{batchNo}")
-    @Operation(summary = "导出错误数据", description = "导出上报失败的数据为Excel")
+    @Operation(summary = "导出上报失败数据", description = "导出上报失败的数据为Excel")
     public void exportErrors(@PathVariable String batchNo, HttpServletResponse response) throws IOException {
         List<ExcelData> failedList = reportService.getFailedReportData(batchNo);
 

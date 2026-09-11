@@ -43,3 +43,7 @@ npm-debug.log*
 # Cache
 .cache/
 .temp/
+
+# 导入任务临时文件
+import-temp/
+backend/import-temp/

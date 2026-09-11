@@ -58,17 +58,28 @@ export const authApi = {
 }
 
 export const excelApi = {
-  import: (file, onProgress) => {
+  /** 创建导入任务（上传后立即返回任务编号） */
+  createTask: (file, onProgress) => {
     const formData = new FormData()
     formData.append('file', file)
-    return request.post('/excel/import', formData, {
+    return request.post('/excel/tasks', formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
-      timeout: 300000,
+      timeout: 120000,
       onUploadProgress: onProgress
     })
   },
+
+  /** 凭任务编号查询进度 */
+  getTaskProgress: (taskNo) => request.get(`/excel/tasks/${taskNo}`),
+
+  /** 分页查询失败行 */
+  getTaskErrors: (taskNo, params) =>
+    request.get(`/excel/tasks/${taskNo}/errors`, { params }),
+
+  /** 失败行导出地址 */
+  exportTaskErrorsUrl: (taskNo) => `${baseURL}/excel/tasks/${taskNo}/errors/export`,
 
   getRecords: (params) => request.get('/excel/records', { params }),
 

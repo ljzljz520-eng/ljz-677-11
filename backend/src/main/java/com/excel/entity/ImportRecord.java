@@ -27,9 +27,19 @@ public class ImportRecord {
     private Long fileSize;
 
     /**
-     * 总记录数
+     * 预估总记录数（xlsx可预扫描，xls可能为0）
      */
     private Integer totalCount;
+
+    /**
+     * 已读取行数
+     */
+    private Integer readCount;
+
+    /**
+     * 已校验行数
+     */
+    private Integer validatedCount;
 
     /**
      * 成功数量
@@ -42,12 +52,47 @@ public class ImportRecord {
     private Integer failCount;
 
     /**
-     * 导入状态：0-处理中 1-完成 2-失败
+     * 导入状态：0-排队/处理中 1-完成 2-完成但有失败行 3-失败/中断
      */
     private Integer status;
 
     /**
-     * 错误信息
+     * 处理阶段：PENDING/COUNTING/PARSING/SAVING/DONE/FAILED
+     */
+    private String stage;
+
+    /**
+     * 进度百分比 0-100
+     */
+    private Integer percent;
+
+    /**
+     * 预计剩余秒数
+     */
+    private Long etaSeconds;
+
+    /**
+     * 处理速率（行/秒）
+     */
+    private Double rowsPerSecond;
+
+    /**
+     * 服务端临时文件路径
+     */
+    private String filePath;
+
+    /**
+     * 开始处理时间
+     */
+    private LocalDateTime startedAt;
+
+    /**
+     * 结束处理时间
+     */
+    private LocalDateTime finishedAt;
+
+    /**
+     * 错误信息（任务级 / 错误行明细在 import_row_error 表）
      */
     @TableField(typeHandler = com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler.class)
     private String errorDetails;
