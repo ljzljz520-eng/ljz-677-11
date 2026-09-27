@@ -25,9 +25,13 @@ public class ExcelDataDTO {
     @ColumnWidth(15)
     private String phone;
 
+    /**
+     * 金额以字符串接收，避免非法数字（如"abc"/"1,200"）在EasyExcel反序列化阶段
+     * 直接抛异常导致整个任务中断；在校验阶段转换为BigDecimal。
+     */
     @ExcelProperty(value = "金额", index = 4)
     @ColumnWidth(12)
-    private BigDecimal amount;
+    private String amount;
 
     @ExcelProperty(value = "地址", index = 5)
     @ColumnWidth(30)
@@ -46,4 +50,14 @@ public class ExcelDataDTO {
      * 错误信息
      */
     private String errorMsg;
+
+    /**
+     * 由校验层转换后的金额（仅校验通过时使用）
+     */
+    public BigDecimal getAmountAsDecimal() {
+        if (amount == null || amount.trim().isEmpty()) {
+            return null;
+        }
+        return new BigDecimal(amount.trim().replace(",", ""));
+    }
 }

@@ -2,12 +2,11 @@ package com.excel.controller;
 
 import com.alibaba.excel.EasyExcel;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.excel.dto.ApiResponse;
-import com.excel.dto.ExcelDataDTO;
-import com.excel.dto.ImportResultDTO;
-import com.excel.dto.ReportResultDTO;
+import com.excel.dto.*;
 import com.excel.entity.ExcelData;
+import com.excel.entity.ImportErrorRow;
 import com.excel.entity.ImportRecord;
+import com.excel.service.AsyncImportService;
 import com.excel.service.ExcelImportService;
 import com.excel.service.ReportService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,42 +23,61 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 @RestController
 @RequestMapping("/api/excel")
 @RequiredArgsConstructor
-@Tag(name = "Excel导入管理", description = "Excel数据导入与上报接口")
+@Tag(name = "Excel导入管理", description = "医保清单分批异步导入、进度查询与上报接口")
 public class ExcelController {
 
     private static final Logger logger = LoggerFactory.getLogger(ExcelController.class);
 
+    private final AsyncImportService asyncImportService;
     private final ExcelImportService excelImportService;
     private final ReportService reportService;
 
     @PostMapping("/import")
-    @Operation(summary = "导入Excel", description = "上传Excel文件进行数据导入")
-    public ApiResponse<ImportResultDTO> importExcel(
+    @Operation(summary = "创建导入任务", description = "上传Excel，后端落盘后异步分批解析，立即返回任务编号")
+    public ApiResponse<Map<String, String>> importExcel(
             @RequestParam("file") MultipartFile file,
             Authentication authentication) {
         try {
-            if (file.isEmpty()) {
-                return ApiResponse.error("请选择要上传的文件");
-            }
-
-            String fileName = file.getOriginalFilename();
-            if (fileName == null || (!fileName.endsWith(".xlsx") && !fileName.endsWith(".xls"))) {
-                return ApiResponse.error("仅支持Excel文件（.xlsx或.xls）");
-            }
-
             Long userId = (Long) authentication.getPrincipal();
-            ImportResultDTO result = excelImportService.importExcel(file, userId);
-            return ApiResponse.success("导入完成", result);
+            String batchNo = asyncImportService.createTask(file, userId);
+            return ApiResponse.success("任务已创建", Map.of("batchNo", batchNo));
+        } catch (IllegalArgumentException e) {
+            return ApiResponse.error(e.getMessage());
         } catch (Exception e) {
-            logger.error("Excel导入失败", e);
-            return ApiResponse.error("导入失败: " + e.getMessage());
+            logger.error("创建导入任务失败", e);
+            return ApiResponse.error("创建导入任务失败: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/import/{batchNo}/progress")
+    @Operation(summary = "查询导入进度", description = "凭任务编号查看已读取/已校验/失败行数及预估剩余时间")
+    public ApiResponse<ImportProgressDTO> getProgress(@PathVariable String batchNo) {
+        return ApiResponse.success(asyncImportService.getProgress(batchNo));
+    }
+
+    @GetMapping("/import/{batchNo}/errors")
+    @Operation(summary = "分页查询校验失败行")
+    public ApiResponse<Page<ImportErrorRow>> getErrors(
+            @PathVariable String batchNo,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "20") Integer pageSize) {
+        return ApiResponse.success(asyncImportService.getErrorRows(batchNo, pageNum, pageSize));
+    }
+
+    @GetMapping("/import/{batchNo}/errors/export")
+    @Operation(summary = "导出校验失败行", description = "流式分页写出，不把全部失败行加载进内存")
+    public void exportImportErrors(@PathVariable String batchNo, HttpServletResponse response) throws IOException {
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding("utf-8");
+        String fileName = URLEncoder.encode("校验失败数据_" + batchNo, StandardCharsets.UTF_8)
+                .replaceAll("\\+", "%20");
+        response.setHeader("Content-disposition", "attachment;filename*=utf-''" + fileName + ".xlsx");
+        asyncImportService.writeErrorExcel(batchNo, response.getOutputStream());
     }
 
     @GetMapping("/records")
@@ -104,9 +122,7 @@ public class ExcelController {
     @Operation(summary = "重试上报", description = "重新上报失败的数据")
     public ApiResponse<ReportResultDTO> retryReport(@PathVariable String batchNo) {
         try {
-            // 先重置失败数据状态
             reportService.resetFailedData(batchNo);
-            // 再次上报
             ReportResultDTO result = reportService.reportToNationalPlatform(batchNo);
             return ApiResponse.success("重新上报完成", result);
         } catch (Exception e) {
@@ -120,29 +136,28 @@ public class ExcelController {
     public void downloadTemplate(HttpServletResponse response) throws IOException {
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
         response.setCharacterEncoding("utf-8");
-        String fileName = URLEncoder.encode("数据导入模板", StandardCharsets.UTF_8)
+        String fileName = URLEncoder.encode("医保清单导入模板", StandardCharsets.UTF_8)
                 .replaceAll("\\+", "%20");
-        response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + fileName + ".xlsx");
+        response.setHeader("Content-disposition", "attachment;filename*=utf-''" + fileName + ".xlsx");
 
-        // 生成模板数据
         List<ExcelDataDTO> templateData = new ArrayList<>();
         ExcelDataDTO example = new ExcelDataDTO();
         example.setDataCode("DATA001");
         example.setName("张三");
         example.setIdCard("110101199001011234");
         example.setPhone("13800138000");
-        example.setAmount(new BigDecimal("1000.00"));
+        example.setAmount("1000.00");
         example.setAddress("北京市朝阳区xxx街道");
         example.setRemark("示例数据");
         templateData.add(example);
 
         EasyExcel.write(response.getOutputStream(), ExcelDataDTO.class)
-                .sheet("数据导入模板")
+                .sheet("医保清单导入模板")
                 .doWrite(templateData);
     }
 
     @GetMapping("/export/errors/{batchNo}")
-    @Operation(summary = "导出错误数据", description = "导出上报失败的数据为Excel")
+    @Operation(summary = "导出上报失败数据", description = "导出上报失败的数据为Excel")
     public void exportErrors(@PathVariable String batchNo, HttpServletResponse response) throws IOException {
         List<ExcelData> failedList = reportService.getFailedReportData(batchNo);
 
@@ -150,9 +165,8 @@ public class ExcelController {
         response.setCharacterEncoding("utf-8");
         String fileName = URLEncoder.encode("上报失败数据_" + batchNo, StandardCharsets.UTF_8)
                 .replaceAll("\\+", "%20");
-        response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + fileName + ".xlsx");
+        response.setHeader("Content-disposition", "attachment;filename*=utf-''" + fileName + ".xlsx");
 
-        // 转换为DTO
         List<ExcelDataDTO> exportList = new ArrayList<>();
         for (ExcelData data : failedList) {
             ExcelDataDTO dto = new ExcelDataDTO();
@@ -160,7 +174,7 @@ public class ExcelController {
             dto.setName(data.getName());
             dto.setIdCard(data.getIdCard());
             dto.setPhone(data.getPhone());
-            dto.setAmount(data.getAmount());
+            dto.setAmount(data.getAmount() == null ? null : data.getAmount().toPlainString());
             dto.setAddress(data.getAddress());
             dto.setRemark(data.getRemark());
             dto.setErrorMsg(data.getReportMessage());

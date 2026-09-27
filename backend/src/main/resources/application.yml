@@ -23,6 +23,10 @@ spring:
       idle-timeout: 600000
       max-lifetime: 1800000
 
+# 导入任务临时文件目录（异步解析期间落盘，容器内需挂卷以支持重启恢复）
+import:
+  storage-dir: ${IMPORT_STORAGE_DIR:/app/import-files}
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true

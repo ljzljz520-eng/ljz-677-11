@@ -58,6 +58,7 @@ export const authApi = {
 }
 
 export const excelApi = {
+  // 创建异步导入任务，立即返回任务编号
   import: (file, onProgress) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -65,10 +66,21 @@ export const excelApi = {
       headers: {
         'Content-Type': 'multipart/form-data'
       },
-      timeout: 300000,
+      timeout: 120000,
       onUploadProgress: onProgress
     })
   },
+
+  // 凭任务编号查询进度
+  getProgress: (batchNo) => request.get(`/excel/import/${batchNo}/progress`),
+
+  // 分页查询校验失败行
+  getImportErrors: (batchNo, params) =>
+    request.get(`/excel/import/${batchNo}/errors`, { params }),
+
+  // 导出校验失败行地址
+  exportImportErrorsUrl: (batchNo) =>
+    `${baseURL}/excel/import/${batchNo}/errors/export`,
 
   getRecords: (params) => request.get('/excel/records', { params }),
 
