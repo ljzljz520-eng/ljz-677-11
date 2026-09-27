@@ -4,6 +4,7 @@ import com.alibaba.excel.EasyExcel;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.excel.dto.ApiResponse;
 import com.excel.dto.ExcelDataDTO;
+import com.excel.dto.ImportProgressDTO;
 import com.excel.dto.ImportResultDTO;
 import com.excel.dto.ReportResultDTO;
 import com.excel.entity.ExcelData;
@@ -25,7 +26,9 @@ import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/excel")
@@ -39,7 +42,7 @@ public class ExcelController {
     private final ReportService reportService;
 
     @PostMapping("/import")
-    @Operation(summary = "导入Excel", description = "上传Excel文件进行数据导入")
+    @Operation(summary = "导入Excel", description = "上传Excel文件进行数据导入（同步，兼容旧接口）")
     public ApiResponse<ImportResultDTO> importExcel(
             @RequestParam("file") MultipartFile file,
             Authentication authentication) {
@@ -60,6 +63,43 @@ public class ExcelController {
             logger.error("Excel导入失败", e);
             return ApiResponse.error("导入失败: " + e.getMessage());
         }
+    }
+
+    @PostMapping("/import/async")
+    @Operation(summary = "异步导入Excel", description = "上传Excel创建异步导入任务，立即返回任务编号，通过进度接口轮询查询")
+    public ApiResponse<Map<String, String>> importExcelAsync(
+            @RequestParam("file") MultipartFile file,
+            Authentication authentication) {
+        try {
+            if (file.isEmpty()) {
+                return ApiResponse.error("请选择要上传的文件");
+            }
+
+            String fileName = file.getOriginalFilename();
+            if (fileName == null || (!fileName.endsWith(".xlsx") && !fileName.endsWith(".xls"))) {
+                return ApiResponse.error("仅支持Excel文件（.xlsx或.xls）");
+            }
+
+            Long userId = (Long) authentication.getPrincipal();
+            String taskId = excelImportService.startAsyncImport(file, userId);
+
+            Map<String, String> result = new HashMap<>();
+            result.put("taskId", taskId);
+            return ApiResponse.success("导入任务已创建", result);
+        } catch (Exception e) {
+            logger.error("创建导入任务失败", e);
+            return ApiResponse.error("创建导入任务失败: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/import/progress/{taskId}")
+    @Operation(summary = "查询导入进度", description = "根据任务编号查询导入进度：已读取/已校验/失败行数/预计完成时间")
+    public ApiResponse<ImportProgressDTO> getImportProgress(@PathVariable String taskId) {
+        ImportProgressDTO progress = excelImportService.getImportProgress(taskId);
+        if (progress == null) {
+            return ApiResponse.error(404, "导入任务不存在: " + taskId);
+        }
+        return ApiResponse.success(progress);
     }
 
     @GetMapping("/records")
@@ -129,7 +169,7 @@ public class ExcelController {
         ExcelDataDTO example = new ExcelDataDTO();
         example.setDataCode("DATA001");
         example.setName("张三");
-        example.setIdCard("110101199001011234");
+        example.setIdCard("110101199001011237");
         example.setPhone("13800138000");
         example.setAmount(new BigDecimal("1000.00"));
         example.setAddress("北京市朝阳区xxx街道");

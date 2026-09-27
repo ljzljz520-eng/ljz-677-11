@@ -85,7 +85,9 @@ docker compose logs -f
 
 ### Excel接口
 
-- `POST /api/excel/import` - 导入Excel文件
+- `POST /api/excel/import/async` - 异步导入Excel，立即返回任务编号
+- `GET /api/excel/import/progress/{taskId}` - 查询导入进度（已读取/已校验/失败行数/预计完成时间）
+- `POST /api/excel/import` - 导入Excel文件（同步，兼容旧接口）
 - `GET /api/excel/records` - 获取导入记录
 - `GET /api/excel/data/{batchNo}` - 获取批次数据
 - `GET /api/excel/template` - 下载导入模板
@@ -109,6 +111,7 @@ docker compose logs -f
 ## 注意事项
 
 1. 系统使用EasyExcel的SAX模式解析Excel，内存占用低，支持大文件
-2. 数据每1000条批量入库，保证性能
-3. 上报国家平台为模拟功能，会随机产生5%的失败率用于测试异常处理
-4. 密码使用BCrypt加密存储，与数据库密码加密方式一致
+2. 导入采用异步任务模式：上传后立即返回任务编号，后台分批解析入库（每1000条一批），前端轮询展示已读取/已校验/失败行数和预计完成时间
+3. 任务进度实时保存在内存并分批持久化到数据库，页面刷新或服务重启后凭任务编号仍可查看进度
+4. 上报国家平台为模拟功能，会随机产生5%的失败率用于测试异常处理
+5. 密码使用BCrypt加密存储，与数据库密码加密方式一致

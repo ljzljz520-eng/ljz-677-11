@@ -45,6 +45,12 @@ jwt:
   secret: excel-import-system-jwt-secret-key-2024-very-long-and-secure
   expiration: 86400000
 
+# Excel导入配置
+excel:
+  import:
+    # 上传文件临时目录（后台异步解析用），默认为系统临时目录下的 excel-import
+    temp-dir: ${java.io.tmpdir}/excel-import
+
 # 日志配置
 logging:
   level:

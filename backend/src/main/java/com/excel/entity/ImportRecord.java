@@ -42,7 +42,7 @@ public class ImportRecord {
     private Integer failCount;
 
     /**
-     * 导入状态：0-处理中 1-完成 2-失败
+     * 导入状态：0-处理中 1-完成 2-部分失败 3-失败
      */
     private Integer status;
 

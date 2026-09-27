@@ -173,12 +173,12 @@ const currentBatchNo = ref('')
 const retrying = ref(false)
 
 const getStatusType = (status) => {
-  const types = { 0: 'info', 1: 'success', 2: 'warning' }
+  const types = { 0: 'info', 1: 'success', 2: 'warning', 3: 'danger' }
   return types[status] || 'info'
 }
 
 const getStatusText = (status) => {
-  const texts = { 0: '处理中', 1: '完成', 2: '部分失败' }
+  const texts = { 0: '处理中', 1: '完成', 2: '部分失败', 3: '失败' }
   return texts[status] || '未知'
 }
 
